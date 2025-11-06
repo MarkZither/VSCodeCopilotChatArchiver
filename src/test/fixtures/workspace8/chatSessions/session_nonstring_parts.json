@@ -1,0 +1,10 @@
+{
+  "sessionId": "parts",
+  "creationDate": "2025-11-02T12:00:00Z",
+  "requests": [
+    {
+      "message": { "text": "Parts test" },
+      "response": [ { "value": { "obj": true } }, { "value": "ok" } ]
+    }
+  ]
+}

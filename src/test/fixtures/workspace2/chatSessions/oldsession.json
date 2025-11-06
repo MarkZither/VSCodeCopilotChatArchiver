@@ -1,0 +1,10 @@
+{
+  "sessionId": "oldsession",
+  "creationDate": "2020-01-01T12:00:00Z",
+  "requests": [
+    {
+      "message": { "text": "Old message" },
+      "response": [ { "value": "Old response" } ]
+    }
+  ]
+}

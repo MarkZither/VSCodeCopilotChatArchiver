@@ -1,0 +1,10 @@
+{
+  "sessionId": "abcdef123456",
+  "creationDate": "2025-01-01T12:00:00Z",
+  "requests": [
+    {
+      "message": { "text": "Hello, how do I write a function?" },
+      "response": [ { "value": "Here is a sample function:\n```js\nfunction foo() { return 1; }\n```" } ]
+    }
+  ]
+}
