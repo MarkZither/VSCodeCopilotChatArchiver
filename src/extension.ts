@@ -1,6 +1,7 @@
 // Minimal valid extension entry point. Keeps behavior minimal to ensure compilation.
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+const fsp = fs.promises;
 import * as path from 'path';
 import * as os from 'os';
 import { promisify } from 'util';
@@ -76,20 +77,50 @@ export function activate(context: vscode.ExtensionContext) {
 			const wfName = vscode.workspace.name || (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0] && vscode.workspace.workspaceFolders[0].name) || '';
 			output.appendLine(`Heuristic result: ${JSON.stringify(workspaceResult)}`);
 
-			const candidates: Array<{ hash: string; sessions: any[]; diagnostics: string[]; path: string; matches?: boolean }> = [];
+			// Stream candidates asynchronously into a QuickPick so the UI appears immediately
+			// and updates as we discover storage contexts. Show a top "Use heuristic" item
+			// so the user can pick the heuristic workspace quickly.
+			let chosenHash: string | undefined = undefined;
+			const qp = vscode.window.createQuickPick<vscode.QuickPickItem & { hash?: string; matches?: boolean }>();
+			qp.placeholder = 'Scanning for Copilot storage contexts...';
+			qp.busy = true;
+			qp.show();
+
+			// If a heuristic workspace is available, offer it as a top choice immediately
+			if (workspaceResult && workspaceResult.hash) {
+				qp.items = [{ label: `Use heuristic workspace: ${wfName || workspaceResult.hash}`, description: `${workspaceResult.hash}`, hash: workspaceResult.hash } as any];
+			} else {
+				qp.items = [];
+			}
+
+			const pickPromise = new Promise<typeof qp.items[0] | undefined>(resolve => {
+				const disposables: vscode.Disposable[] = [];
+				disposables.push(qp.onDidAccept(() => { resolve(qp.selectedItems[0] as any); qp.hide(); disposables.forEach(d => d.dispose()); }));
+				disposables.push(qp.onDidHide(() => { resolve(undefined); disposables.forEach(d => d.dispose()); }));
+			});
+
 			try {
 				if (fs.existsSync(workspaceStoragePath)) {
-					const dirs = fs.readdirSync(workspaceStoragePath);
+					const dirs = await fsp.readdir(workspaceStoragePath).catch(() => [] as string[]);
+					const total = dirs.length || 0;
+					let scanned = 0;
 					for (const d of dirs) {
+						scanned++;
+						qp.placeholder = `Scanning ${scanned}/${total} workspaces...`;
 						const chatSessionsPath = path.join(workspaceStoragePath, d, 'chatSessions');
-						if (!fs.existsSync(chatSessionsPath)) { continue; }
-						const sessionFiles = fs.readdirSync(chatSessionsPath).filter(f => f.endsWith('.json'));
+						try {
+							const stat = await fsp.stat(chatSessionsPath).catch(() => null as any);
+							if (!stat || !stat.isDirectory()) { continue; }
+						} catch (e) { continue; }
+						const sessionFiles = (await fsp.readdir(chatSessionsPath).catch(() => [] as string[])).filter(f => f.endsWith('.json'));
 						if (sessionFiles.length === 0) { continue; }
 						// quick recency check (30 days)
 						let mostRecent = 0;
 						for (const f of sessionFiles) {
-							const s = fs.statSync(path.join(chatSessionsPath, f));
-							if (s.mtime.getTime() > mostRecent) { mostRecent = s.mtime.getTime(); }
+							try {
+								const s = await fsp.stat(path.join(chatSessionsPath, f));
+								if (s.mtime.getTime() > mostRecent) { mostRecent = s.mtime.getTime(); }
+							} catch (e) { }
 						}
 						const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
 						if (mostRecent <= thirtyDaysAgo) { continue; }
@@ -104,58 +135,33 @@ export function activate(context: vscode.ExtensionContext) {
 								const found2 = findSessionsContainingText(workspaceStoragePath, d, wfName, 20);
 								if (found2 && found2.length > 0) { matches = true; }
 							}
-						} catch (e) {
-							// ignore
-						}
-						candidates.push({ hash: d, sessions: scan.sessions, diagnostics: scan.diagnostics, path: chatSessionsPath, matches });
+						} catch (e) { /* ignore */ }
+
+						const preview = scan.sessions && scan.sessions.length > 0 ? (scan.sessions[0].preview || scan.sessions[0].file) : '';
+						const friendly = (matches && wfName) ? wfName : (preview ? cleanText(preview).substring(0, 60) : d);
+						const item = { label: friendly, description: `${scan.sessions.length} sessions`, detail: `${d} — ${chatSessionsPath}`, hash: d, matches } as any;
+
+						// append while keeping the existing top heuristic item at index 0
+						const existing = qp.items.slice(0, workspaceResult && workspaceResult.hash ? 1 : 0);
+						qp.items = existing.concat(qp.items.slice(existing.length)).concat(item);
+
+						// yield occasionally to keep UI responsive
+						if (scanned % 8 === 0) { await new Promise(r => setTimeout(r, 0)); }
 					}
-					// prefer matches
-					candidates.sort((a, b) => ((a.matches ? 0 : 1) - (b.matches ? 0 : 1)));
-					output.appendLine(`Enumerated ${candidates.length} candidate storage hashes`);
+					output.appendLine(`Enumerated candidates while streaming`);
 				}
 			} catch (e) {
 				output.appendLine(`Error enumerating candidates: ${String(e)}`);
 			}
 
-			// If we found candidates, always present the chooser so the user sees the list of workspaces/storage hashes
-			let chosenHash: string | undefined = undefined;
-			if (candidates.length > 0) {
-				// log candidate details for debugging
-				for (const c of candidates) {
-					const preview = c.sessions && c.sessions.length > 0 ? (c.sessions[0].preview || c.sessions[0].file) : '';
-					output.appendLine(`candidate: ${c.hash} matches:${c.matches ? 'yes' : 'no'} sessions:${c.sessions.length} preview:${preview}`);
-				}
-				// Build friendly labels: prefer workspace name when matched, then session preview, else hash
-				const items = candidates.map(c => {
-					const preview = c.sessions && c.sessions.length > 0 ? (c.sessions[0].preview || c.sessions[0].file) : '';
-					const friendly = (c.matches && wfName) ? wfName : (preview ? cleanText(preview).substring(0, 60) : c.hash);
-					return ({ label: friendly, description: `${c.sessions.length} sessions`, detail: `${c.hash} — ${c.path}`, hash: c.hash, matches: c.matches } as any);
-				});
-
-				// determine preferred index (first matching candidate or 0)
-				const preferredIndex = items.findIndex(i => (i as any).matches);
-				const qp = vscode.window.createQuickPick<vscode.QuickPickItem & { hash?: string; matches?: boolean }>();
-				qp.items = items;
-				if (preferredIndex >= 0 && qp.items && qp.items.length > preferredIndex) {
-					qp.activeItems = [qp.items[preferredIndex]];
-				} else if (qp.items && qp.items.length > 0) {
-					qp.activeItems = [qp.items[0]];
-				}
-				qp.placeholder = 'Select which storage context to scan for Copilot sessions';
-				qp.show();
-				const pick = await new Promise<typeof qp.items[0] | undefined>(resolve => {
-					const disposables: vscode.Disposable[] = [];
-					disposables.push(qp.onDidAccept(() => { resolve(qp.selectedItems[0] as any); qp.hide(); disposables.forEach(d => d.dispose()); }));
-					disposables.push(qp.onDidHide(() => { resolve(undefined); disposables.forEach(d => d.dispose()); }));
-				});
-				qp.dispose();
-				if (!pick) { vscode.window.showInformationMessage('Export cancelled'); return; }
-				chosenHash = (pick as any).hash;
-				output.appendLine(`User selected storage hash: ${chosenHash}`);
-			} else {
-				// no candidates found — fall back to heuristic
-				chosenHash = workspaceResult.hash || undefined;
-			}
+			qp.busy = false;
+			qp.placeholder = 'Select which storage context to scan for Copilot sessions';
+			const pick = await pickPromise;
+			qp.dispose();
+			if (!pick) { vscode.window.showInformationMessage('Export cancelled'); return; }
+			// If user picked the heuristic top-item (it has no sessions count/hash equal to workspaceResult.hash), honor it
+			chosenHash = (pick as any).hash || workspaceResult.hash || undefined;
+			output.appendLine(`User selected storage hash: ${chosenHash}`);
 
 			// Continue with minimal export action to prove functionality
 				await mkdir(outDir!, { recursive: true } as any);

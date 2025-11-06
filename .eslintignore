@@ -1,0 +1,6 @@
+out/
+dist/
+**/*.js
+**/*.js.map
+node_modules/
+tmp_vsix_extract/

@@ -14,6 +14,8 @@ export default [{
         sourceType: "module",
     },
 
+    ignores: ["out/**", "dist/**", "**/*.js", "**/*.js.map", "node_modules/**", "tmp_vsix_extract/**"],
+
     rules: {
         "@typescript-eslint/naming-convention": ["warn", {
             selector: "import",

@@ -3,7 +3,7 @@
   "displayName": "Github Copilot Chat Archiver",
   "description": "Archive Github Copilot chat to markdown or json for backup or memory",
   "icon": "images/icon.png",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "MarkZither",
   "license": "MIT",
   "repository": {
@@ -76,7 +76,8 @@
     "test": "vscode-test",
     "unit-test": "npm run compile-tests && c8 --reporter=lcov --reporter=text --check-coverage --lines 80 --functions 80 --branches 80 --statements 80 mocha --ui tdd \"out/test/**/*.test.js\"",
     "coverage": "npm run unit-test",
-    "package-vsix": "vsce package || echo 'vsce not installed'"
+    "package-vsix": "vsce package || echo 'vsce not installed'",
+    "package-for-marketplace": "node scripts/swap-readme.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
