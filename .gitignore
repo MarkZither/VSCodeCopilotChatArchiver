@@ -137,3 +137,7 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# VSIX packaging temp
+/tmp_vsix_extract/
+tmp_vsix_extract/

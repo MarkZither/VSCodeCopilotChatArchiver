@@ -1,4 +1,18 @@
-.vscode/**
+node_modules/**
+src/**
+test/**
+.github/**
+*.code-workspace
+*.log
+package-lock.json
+tsconfig.json
+esbuild.js
+README.VSCodeExt.md
+README.md
+coverage/**
+nyc.config.js
+/.vscode/**
+.vscode/**.vscode/**
 .vscode-test/**
 out/**
 node_modules/**
@@ -12,3 +26,4 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+tmp_vsix_extract/**

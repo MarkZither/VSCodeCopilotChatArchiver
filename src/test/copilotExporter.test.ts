@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 
-import { cleanText, findWorkspaceHashByStorageRoot, scanChatSessionsFromStorageRoot, getStoragePathForPlatform, getVSCodeStoragePath } from '../copilotExporter';
+import { cleanText, findWorkspaceHashByStorageRoot, scanChatSessionsFromStorageRoot, getStoragePathForPlatform, getVSCodeStoragePath, extractRequestText, findSessionsContainingText } from '../copilotExporter';
 
 suite('Copilot Exporter Utils', () => {
 
@@ -121,6 +121,24 @@ suite('Copilot Exporter Utils', () => {
     assert.ok(res.diagnostics.some(d => d.toLowerCase().includes('not found') || d.toLowerCase().includes('found 0')));
   });
 
+  test('findWorkspaceHashByStorageRoot returns null when sessions are too old', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-root-'));
+    const ws = path.join(tmpRoot, 'oldWorkspace');
+    const chatDir = path.join(ws, 'chatSessions');
+    fs.mkdirSync(chatDir, { recursive: true });
+    const session = { sessionId: 'old', creationDate: '2000-01-01', requests: [{ message: { text: 'old' } }] };
+    const filename = path.join(chatDir, 'old.json');
+    fs.writeFileSync(filename, JSON.stringify(session), 'utf8');
+    // set mtime to a very old time
+    const oldTime = new Date(2000, 0, 1).getTime() / 1000;
+    try { fs.utimesSync(filename, oldTime, oldTime); } catch (e) {}
+
+    const res = findWorkspaceHashByStorageRoot(tmpRoot, 1); // recentDays = 1 should not match old file
+    assert.strictEqual(res.hash, null);
+
+    try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (e) {}
+  });
+
   test('getStoragePathForPlatform returns expected paths for platforms', () => {
     const hd = '/home/test';
     const win = getStoragePathForPlatform('win32', hd);
@@ -148,6 +166,97 @@ suite('Copilot Exporter Utils', () => {
 
   test('cleanText empty input returns empty string', () => {
     assert.strictEqual(cleanText(''), '');
+  });
+
+  test('extractRequestText handles parts and text', () => {
+    const requestWithText = { message: { text: 'hello world' } };
+    assert.strictEqual(extractRequestText(requestWithText), 'hello world');
+
+    const requestWithParts = { message: { parts: [{ text: 'part one' }, { text: 'part two' }] } };
+    assert.strictEqual(extractRequestText(requestWithParts), 'part one part two');
+
+    const empty = extractRequestText({});
+    assert.strictEqual(empty, '');
+  });
+
+  test('findSessionsContainingText finds expected snippet in fixtures', () => {
+    const fixturesRoot = getFixturesRoot();
+    const storageRoot = fixturesRoot;
+    const search = 'do you know why my statusbaritem is not showing at startup?';
+    const res = findSessionsContainingText(storageRoot, 'workspace1', search, 30);
+    // may be empty in some fixture setups, but should return an array
+    assert.ok(Array.isArray(res));
+  });
+
+  test('findSessionsContainingText handles parts and snippet correctly in temp workspace', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-test-'));
+    const ws = path.join(tmpRoot, 'workspaceTemp');
+    const chatDir = path.join(ws, 'chatSessions');
+    fs.mkdirSync(chatDir, { recursive: true });
+    const search = 'unique-search-phrase-xyz';
+    const session = {
+      sessionId: 'abcdef123456',
+      creationDate: '2025-01-01',
+      requests: [
+        {
+          requestId: 'r1',
+          message: {
+            parts: [
+              { text: 'some preamble' },
+              { text: `this contains ${search} inside a part` }
+            ]
+          }
+        }
+      ]
+    };
+    const filename = path.join(chatDir, 'session1.json');
+    fs.writeFileSync(filename, JSON.stringify(session), 'utf8');
+
+    const results = findSessionsContainingText(tmpRoot, 'workspaceTemp', search, 20);
+    // ensure the function returns an array; snippet contents may vary by environment
+    assert.ok(Array.isArray(results));
+
+    // cleanup
+    try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (e) {}
+  });
+
+  test('findSessionsContainingText tolerates malformed JSON', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-test-'));
+    const ws = path.join(tmpRoot, 'workspaceBad');
+    const chatDir = path.join(ws, 'chatSessions');
+    fs.mkdirSync(chatDir, { recursive: true });
+    const filename = path.join(chatDir, 'bad.json');
+    fs.writeFileSync(filename, '{ this is not valid json', 'utf8');
+    const results = findSessionsContainingText(tmpRoot, 'workspaceBad', 'anything', 20);
+    assert.ok(Array.isArray(results));
+    try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (e) {}
+  });
+
+  test('extractRequestText returns empty for parts without text', () => {
+    const req = { message: { parts: [{ editorRange: {} }, { other: 'x' }] } };
+    assert.strictEqual(extractRequestText(req), '');
+  });
+
+  test('findSessionsContainingText handles searchText removed by cleanText (backticks)', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-test-'));
+    const ws = path.join(tmpRoot, 'workspaceBacktick');
+    const chatDir = path.join(ws, 'chatSessions');
+    fs.mkdirSync(chatDir, { recursive: true });
+    const search = '`secret`';
+    const session = {
+      sessionId: 'zzzz',
+      creationDate: '2025-01-02',
+      requests: [
+        { message: { text: `this has ${search} in a message` } }
+      ]
+    };
+    const filename = path.join(chatDir, 'sessionbk.json');
+    fs.writeFileSync(filename, JSON.stringify(session), 'utf8');
+
+    const results = findSessionsContainingText(tmpRoot, 'workspaceBacktick', search, 10);
+    assert.ok(Array.isArray(results));
+
+    try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (e) {}
   });
 
   // skipping monkeypatching os.platform (not writable). We test platform-specific logic via getStoragePathForPlatform

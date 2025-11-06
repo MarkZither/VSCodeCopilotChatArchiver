@@ -2,7 +2,22 @@
   "name": "github-copilot-chat-archiver",
   "displayName": "Github Copilot Chat Archiver",
   "description": "Archive Github Copilot chat to markdown or json for backup or memory",
+  "icon": "images/icon.png",
   "version": "0.0.1",
+  "publisher": "MarkZither",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MarkZither/VSCodeCopilotChatArchiver"
+  },
+  "keywords": [
+    "copilot",
+    "github",
+    "chat",
+    "export",
+    "archive"
+  ],
+  "homepage": "https://github.com/MarkZither/VSCodeCopilotChatArchiver#readme",
   "engines": {
     "vscode": "^1.105.0"
   },
@@ -32,6 +47,18 @@
           "when": "true"
         }
       ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "Github Copilot Chat Archiver",
+      "properties": {
+        "github-copilot-chat-archiver.outputDirectory": {
+          "type": "string",
+          "description": "Default directory to write Copilot exports. Can be set per-workspace or globally.",
+          "default": "",
+          "scope": "resource"
+        }
+      }
     }
   },
   "scripts": {
@@ -41,41 +68,50 @@
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
-    "compile-tests": "tsc -p . --outDir out",
+    "compile-tests": "tsc -p . --outDir out --sourceMap",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
-  "unit-test": "nyc --reporter=lcov --reporter=text --check-coverage --statements 80 --branches 80 --functions 80 --lines 80 mocha --ui tdd -r ts-node/register -r source-map-support/register \"src/test/copilotExporter.test.ts\"",
-    "coverage": "npm run unit-test"
+    "unit-test": "npm run compile-tests && c8 --reporter=lcov --reporter=text --check-coverage --lines 80 --functions 80 --branches 80 --statements 80 mocha --ui tdd \"out/test/**/*.test.js\"",
+    "coverage": "npm run unit-test",
+    "package-vsix": "vsce package || echo 'vsce not installed'"
   },
   "devDependencies": {
-  "nyc": "^15.1.0",
-  "mocha": "^10.2.0",
-  "ts-node": "^10.9.1",
-  "source-map-support": "^0.5.21",
-    "@types/vscode": "^1.105.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/vscode": "^1.105.0",
     "@typescript-eslint/eslint-plugin": "^8.45.0",
     "@typescript-eslint/parser": "^8.45.0",
-    "eslint": "^9.36.0",
-    "esbuild": "^0.25.10",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.11",
-    "@vscode/test-electron": "^2.5.2"
-  }
-  ,"nyc": {
+    "@vscode/test-electron": "^2.5.2",
+    "c8": "^10.1.3",
+    "esbuild": "^0.25.10",
+    "eslint": "^9.36.0",
+    "mocha": "^10.2.0",
+    "npm-run-all": "^4.1.5",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.9.3"
+  },
+  "c8": {
     "all": true,
-    "include": ["src/**/*.ts"],
-    "extension": [".ts"],
-    "reporter": ["lcov", "text"],
+    "src": "src",
+    "include": [
+      "out/**/*.js"
+    ],
+    "exclude": [
+      "out/test/**"
+    ],
+    "reporter": [
+      "lcov",
+      "text"
+    ],
     "check-coverage": true,
-    "statements": 80,
-    "branches": 80,
+    "lines": 80,
     "functions": 80,
-    "lines": 80
+    "branches": 80,
+    "statements": 80
   }
 }
